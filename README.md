@@ -1,4 +1,9 @@
-# EAGLE COOL FUSE Drive
+# Eagle.cool fuse filesystem
+
+![Eagle cool fuse filesystem](img/header.jpg "Eagle cool fuse filesystem")
+
+This project is for mounting Eagle libraries as a filesystem with FUSE.
+Currently, it only supports Linux, but it may also be usable with macFuse and other platforms.
 
 ## Install
 
