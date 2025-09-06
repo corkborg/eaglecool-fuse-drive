@@ -1,3 +1,5 @@
+from collections import defaultdict
+from email.policy import default
 import json
 from pathlib import Path
 import logging
@@ -20,7 +22,7 @@ class EagleRepository:
         self.indexed_folders: dict[EagleFolderID, EagleFolder] = {}
         self.indexed_files: dict[EagleFileID, EagleFile] = {}
 
-        self.indexed_files_by_folderid: dict[EagleFolderID, list[EagleFileID]] = {}
+        self.indexed_files_by_folderid: defaultdict[EagleFolderID, list[EagleFileID]] = defaultdict(list)
 
     def load(self):
         """
@@ -37,6 +39,10 @@ class EagleRepository:
         if path == '/':
             for folder in self.folders:
                 files.append(folder.normalize_name())
+
+            for file_id in self.indexed_files_by_folderid.get(EagleRootFolderID, []):
+                file = self.indexed_files[file_id]
+                files.append(file.normalize_name())
         else:
             folder_id = self.search_folder(path)
             if folder_id is None:
@@ -144,10 +150,12 @@ class EagleRepository:
             )
             self.indexed_files[file.id] = file
             if len(file.folders) == 0:
-                self.indexed_files_by_folderid[EagleRootFolderID] = self.indexed_files_by_folderid.get(EagleRootFolderID, []) + [file.id]
+                self.indexed_files_by_folderid[EagleRootFolderID].append(file.id)
             else:
                 for fid in file.folders:
-                    self.indexed_files_by_folderid[fid] = self.indexed_files_by_folderid.get(fid, []) + [file.id]
+                    if fid is None:
+                        continue
+                    self.indexed_files_by_folderid[fid].append(file.id)
 
     def search_file(self, path: str) -> EagleFileID | None:
         if path == '/':
