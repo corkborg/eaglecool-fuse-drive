@@ -38,7 +38,7 @@ class EagleFS(Fuse):
             st = FSStat()
             st.st_uid = os.getuid()
             st.st_gid = os.getgid()
-            st.st_mode = stat.S_IFDIR | 0o755
+            st.st_mode = stat.S_IFDIR | 0o775
             st.st_nlink = 2
             return st
 

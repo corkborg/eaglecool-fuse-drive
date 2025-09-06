@@ -17,13 +17,13 @@ pip3 install -r requirements.txt
 ## Launch
 
 ```
-python3 eagle_drive.py /mnt
+python3 eagle_fs.py /mnt
 ```
 
 If you need to share with daemons like samba, docker etc (you need to allow_user in FUSE)
 
 ```
-python3 eagle_drive.py /mnt -o allow_other
+python3 eagle_fs.py /mnt -o allow_other
 ```
 
 ## Stop
@@ -35,13 +35,20 @@ umount /mnt
 ## Debug
 
 ```
-python3 eagle_drive.py /mnt -f -d
+python3 eagle_fs.py /mnt -f -d
+```
+
+## Unittest
+
+```
+python3 -m unittest discover -s tests
 ```
 
 ## Fuse allow user.
 
-By default, FUSE makes files visible only to the running user.<br>
-To make the filesystem visible to systems with different running users, such as Samba, you need to change the FUSE settings.
+By default, FUSE makes files visible only to current user.
+
+To make the file system visible to systems with different running users, such as Samba, Docker, etc., you need to change the FUSE configuration.
 
 ```
 echo 'user_allow_other' > /etc/fuse.conf
