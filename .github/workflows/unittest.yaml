@@ -2,6 +2,9 @@ name: unittest
 on:
   pull_request:
   workflow_dispatch:
+  push:
+    branches:
+      - main
 jobs:
   unittest:
     runs-on: ubuntu-latest
