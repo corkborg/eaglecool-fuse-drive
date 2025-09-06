@@ -35,6 +35,8 @@ pip3 install -r requirements.txt
 
 ## Launch
 
+Edit config.toml.
+
 ```
 python3 eagle_fs.py /mnt
 ```
