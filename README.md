@@ -1,8 +1,11 @@
-# Eagle.cool fuse filesystem
+# Eagle cool fuse filesystem
 
 ![Eagle cool fuse filesystem](img/header.jpg "Eagle cool fuse filesystem")
 
-This project is for mounting Eagle libraries as a filesystem with FUSE.
+
+Eagle cool is an image management tool (https://eagle.cool/)
+
+This project is for mounting Eagle cool libraries as a filesystem with FUSE.<br>
 Currently, it only supports Linux, but it may also be usable with macFuse and other platforms.
 
 ## Install
@@ -12,6 +15,12 @@ pip3 install -r requirements.txt
 ```
 
 ## Launch
+
+```
+python3 eagle_drive.py /mnt
+```
+
+If you need to share with daemons like samba, docker etc (you need to allow_user in FUSE)
 
 ```
 python3 eagle_drive.py /mnt -o allow_other
@@ -26,12 +35,12 @@ umount /mnt
 ## Debug
 
 ```
-python3 eagle_drive.py /mnt -f -d -o allow_other
+python3 eagle_drive.py /mnt -f -d
 ```
 
-## File sharing
+## Fuse allow user.
 
-By default, FUSE makes files visible only to the running user.
+By default, FUSE makes files visible only to the running user.<br>
 To make the filesystem visible to systems with different running users, such as Samba, you need to change the FUSE settings.
 
 ```
