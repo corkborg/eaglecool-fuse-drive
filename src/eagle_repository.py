@@ -85,7 +85,7 @@ class EagleRepository:
         get file path of file
         """
         if file.ext is None:
-            return self.library_path / 'images' / file.folder_name() / f'{file.name}
+            return self.library_path / 'images' / file.folder_name() / f'{file.name}'
         return self.library_path / 'images' / file.folder_name() / f'{file.name}.{file.ext}'
 
     def load_folders(self):
