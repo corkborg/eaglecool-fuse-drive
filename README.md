@@ -5,8 +5,7 @@
 
 Eagle cool is an image management tool (https://eagle.cool/)
 
-This project is for mounting Eagle cool libraries as a filesystem with FUSE.<br>
-Currently, it only supports Linux, but it may also be usable with macFuse and other platforms.
+This project is for mounting Eagle cool libraries as a filesystem with FUSE.
 
 ```shell
 $ python3 eagle_fs.py /mnt
