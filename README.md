@@ -8,6 +8,25 @@ Eagle cool is an image management tool (https://eagle.cool/)
 This project is for mounting Eagle cool libraries as a filesystem with FUSE.<br>
 Currently, it only supports Linux, but it may also be usable with macFuse and other platforms.
 
+```shell
+$ python3 eagle_fs.py /mnt
+
+$ ls -l /mnt
+-r--r--r-- 1 user user 3036  8月 19  57651  blue_MF7XBDKD71MCF.png
+drwxr-xr-x 2 user user    0  8月 16  57651 'empty folder_MF7X5JO46GF79'/
+drwxr-xr-x 2 user user    0  8月 14  57651  folder_MF7X2TP5LYADS/
+drwxr-xr-x 2 user user    0  8月 15  57651  nested_folder_MF7X4JQBHM2E7/
+drwxr-xr-x 2 user user    0  8月 16  57651  nested_folder_empty_MF7X58NBYUNSQ/
+drwxr-xr-x 2 user user    0  8月 16  57651  samefolder_MF7X5W2L2ZJ34/
+drwxr-xr-x 2 user user    0  8月 16  57651  samefolder_MF7X6HU53Z5W2/
+-r--r--r-- 1 user user   17  8月 14  57651  text_MF7X2MAQ0AQ13.txt
+drwxr-xr-x 2 user user    0  8月 17  57651  マルチバイト文字_MF7X8BK904Y2J/
+-r--r--r-- 1 user user 3064  8月 19  57651  藍色_MF7XAA9R3JVUZ.png
+
+$ ls /mnt/folder_MF7X2TP5LYADS/
+orangepng_MF7X11V2AM3EP.png  pink_gif_MF7X1TY7F0LWI.gif
+```
+
 ## Install
 
 ```
