@@ -9,7 +9,7 @@ This project is for mounting Eagle cool libraries as a filesystem with FUSE.<br>
 Currently, it only supports Linux, but it may also be usable with macFuse and other platforms.
 
 ```shell
-$ python3 eagle_fs.py /mnt
+$ python3 eagle_fs.py /mnt --eagle_lib_path=test.library
 
 $ ls -l /mnt
 total 7
@@ -34,16 +34,14 @@ pip3 install -r requirements.txt
 
 ## Launch
 
-Edit config.toml.
-
 ```bash
-python3 eagle_fs.py /mnt
+python3 eagle_fs.py /mnt --eagle_lib_path=test.library
 ```
 
 If you need to share with daemons like samba, docker etc (you need to allow_user in FUSE)
 
 ```bash
-python3 eagle_fs.py /mnt -o allow_other
+python3 eagle_fs.py /mnt --eagle_lib_path=test.library -o allow_other
 ```
 
 ## Stop
@@ -55,7 +53,7 @@ umount /mnt
 ## Debug
 
 ```bash
-python3 eagle_fs.py /mnt -f -d
+python3 eagle_fs.py /mnt --eagle_lib_path=test.library -f -d
 ```
 
 ## Unittest
@@ -64,7 +62,7 @@ python3 eagle_fs.py /mnt -f -d
 python3 -m unittest discover -s tests
 ```
 
-## Fuse allow user.
+## Fuse allow other.
 
 By default, FUSE makes files visible only to current user.
 
