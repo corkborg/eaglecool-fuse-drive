@@ -1,28 +1,42 @@
-from collections import defaultdict
-from email.policy import default
 import json
-from pathlib import Path
 import logging
+import threading
+from collections import defaultdict
+from pathlib import Path
+from watchfiles import watch, Change
 
-from src.model import EagleFile, EagleFileID, EagleFolder, EagleFolderID, EagleRootFolderID
+from src.model import EagleFile, EagleFileID, EagleFolder, EagleFolderID, EagleRootFolderID, eagle_file_factory
 
 logger = logging.getLogger("eagle")
-logger.setLevel(logging.INFO)
 
 
-class EagleRepository:
+class EagleRepository(threading.Thread):
 
     def __init__(self, library_path: Path | str):
         """
         Eagle library repository
         :param library_path: Path to Eagle library.
         """
+        threading.Thread.__init__(self)
+
         self.library_path = Path(library_path)
         self.folders: list[EagleFolder] = []
         self.indexed_folders: dict[EagleFolderID, EagleFolder] = {}
         self.indexed_files: dict[EagleFileID, EagleFile] = {}
 
-        self.indexed_files_by_folderid: defaultdict[EagleFolderID, list[EagleFileID]] = defaultdict(list)
+        self.indexed_files_by_folderid: defaultdict[EagleFolderID, set[EagleFileID]] = defaultdict(set)
+
+        # Event to stop monitoring
+        self.stop_event = threading.Event()
+
+    def close(self):
+        self.stop_event.set()
+
+    def run(self):
+        try:
+            self.watchfiles()
+        except Exception as e:
+            logger.exception(e)
 
     def load(self):
         """
@@ -39,10 +53,7 @@ class EagleRepository:
         if path == '/':
             for folder in self.folders:
                 files.append(folder.normalize_name())
-
-            for file_id in self.indexed_files_by_folderid.get(EagleRootFolderID, []):
-                file = self.indexed_files[file_id]
-                files.append(file.normalize_name())
+            folder_id = EagleRootFolderID
         else:
             folder_id = self.search_folder(path)
             if folder_id is None:
@@ -51,9 +62,18 @@ class EagleRepository:
             for folder in self.indexed_folders[folder_id].children:
                 files.append(folder.normalize_name())
 
-            for file_id in self.indexed_files_by_folderid.get(folder_id, []):
-                file = self.indexed_files[file_id]
-                files.append(file.normalize_name())
+        delete_list = []
+        for file_id in self.indexed_files_by_folderid.get(folder_id, []):
+            file = self.indexed_files[file_id]
+
+            if folder_id not in file.folders or file.is_deleted:
+                delete_list.append((folder_id, file_id))
+                continue
+
+            files.append(file.normalize_name())
+
+        for delete in delete_list:
+            self.indexed_files_by_folderid[delete[0]] -= {delete[1]}
         return files
 
     def get_metadata(self, path: str) -> EagleFile | EagleFolder:
@@ -106,7 +126,7 @@ class EagleRepository:
                 id=folder_obj['id'],
                 name=folder_obj['name'],
                 children=[parse_folder(child) for child in folder_obj.get('children', [])],
-                modificationTime=folder_obj.get('modificationTime', 0)
+                modification_time=folder_obj.get('modificationTime', 0)
             )
 
         self.folders = [parse_folder(folder) for folder in obj['folders']]
@@ -137,27 +157,24 @@ class EagleRepository:
                 logger.error(f"Skip broken metadata file: {f}")
                 continue
 
-            file = EagleFile(
-                id=obj['id'],
-                name=obj['name'],
-                folders=[EagleFolderID(fid) for fid in obj.get('folders', [])],
-                ext=obj.get('ext', None),
-                size=obj.get('size', 0),
-                width=obj.get('width', 0),
-                height=obj.get('height', 0),
-                modificationTime=obj.get('modificationTime', 0),
-                lastModified=obj.get('lastModified', 0)
-            )
+            file = eagle_file_factory(obj)
+
+            if file.is_deleted:
+                continue
+
             self.indexed_files[file.id] = file
             if len(file.folders) == 0:
-                self.indexed_files_by_folderid[EagleRootFolderID].append(file.id)
+                self.indexed_files_by_folderid[EagleRootFolderID] |= {file.id}
             else:
                 for fid in file.folders:
                     if fid is None:
                         continue
-                    self.indexed_files_by_folderid[fid].append(file.id)
+                    self.indexed_files_by_folderid[fid] |= {file.id}
 
     def search_file(self, path: str) -> EagleFileID | None:
+        """
+        Searching for files in the Eagle library
+        """
         if path == '/':
             return None
         path_parts = str(path[1:]).split('/')
@@ -186,3 +203,68 @@ class EagleRepository:
             return None
         path_parts = str(path[1:]).split('/')
         return inner_search_path(self.folders, path_parts)
+
+    def watchfiles(self):
+        for changes in watch(self.library_path, step=200, stop_event=self.stop_event):
+            # Convert abs path to rel path
+            new_changes = []
+            for change in changes:
+                relpath = Path(change[1]).relative_to(self.library_path.absolute())
+                new_change = (change[0], relpath)
+                new_changes.append(new_change)
+
+            logger.debug("changes: %s", new_changes)
+            self.process_changes(set(new_changes))
+
+    def create_image_metadata_path(self, file_id: EagleFileID):
+        return self.library_path / 'images' / f'{file_id}.info' / 'metadata.json'
+
+    def extract_image_id(self, rel_path: Path) -> str | None:
+        """
+        extract image id from relative path.
+        """
+        if rel_path.parts[0] != 'images':
+            return None
+        if len(rel_path.parts) >= 2 and rel_path.parts[1].endswith('.info'):
+            return rel_path.parts[1].replace('.info', '')
+        return None
+
+    def process_changes(self, changes: set[tuple[Change, str]]):
+        image_ids = []
+        other_change_paths = []
+
+        # Aggregate changes
+        for change in changes:
+            change_path = Path(change[1])
+            if change_path.parts[0] == 'images':
+                file_id = EagleFileID(change_path.parts[1].replace('.info', ''))
+                image_ids.append(file_id)
+            else:
+                other_change_paths.append(change_path)
+        image_ids = list(set(image_ids))  # Remove duplicates
+
+        # Apply images
+        for image_id in image_ids:
+            self.update_file_info(image_id)
+
+        # Apply other changes
+        for path in other_change_paths:
+            if path == Path('metadata.json'):
+                self.load_folders()
+
+    def update_file_info(self, file_id: EagleFileID):
+        """
+        Update information related to changed file.
+        """
+        image_metadata = self.create_image_metadata_path(file_id)
+
+        if not image_metadata.exists():
+            self.indexed_files.pop(file_id, None)
+            return
+
+        with open(image_metadata, 'r') as f:
+            obj = json.load(f)
+        file = eagle_file_factory(obj)
+        self.indexed_files[file.id] = file
+        for fid in file.folders:
+            self.indexed_files_by_folderid[fid] |= {file.id}

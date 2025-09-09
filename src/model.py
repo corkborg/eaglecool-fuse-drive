@@ -18,7 +18,7 @@ class EagleFolder:
     id: EagleFolderID
     name: str
     children: list['EagleFolder']
-    modificationTime: int
+    modification_time: int
 
     def normalize_name(self):
         return sanitize_filename(f'{self.name}_{self.id}')
@@ -27,24 +27,26 @@ class EagleFolder:
         st = FSStat()
         st.st_uid =  os.getuid()
         st.st_gid =  os.getgid()
-        st.st_atime = self.modificationTime
-        st.st_mtime = self.modificationTime
+        st.st_atime = self.modification_time
+        st.st_mtime = self.modification_time
         #st.st_ctime = self.modificationTime
         st.st_mode = stat.S_IFDIR | 0o755
         st.st_nlink = 2
         return st
 
+
 @dataclass
 class EagleFile:
     id: EagleFileID
     name: str
-    folders: list[EagleFolderID]
+    folders: set[EagleFolderID]
     ext: str | None
+    is_deleted: bool
     size: int
     width: int
     height: int
-    modificationTime: int
-    lastModified: int
+    modification_time: int
+    last_modified: int
 
     def normalize_name(self):
         return sanitize_filename(f'{self.name}_{self.id}.{self.ext}')
@@ -56,13 +58,28 @@ class EagleFile:
         st = FSStat()
         st.st_uid =  os.getuid()
         st.st_gid =  os.getgid()
-        st.st_atime = self.lastModified
-        st.st_mtime = self.modificationTime
-        st.st_ctime = self.lastModified
+        st.st_atime = self.last_modified
+        st.st_mtime = self.modification_time
+        st.st_ctime = self.last_modified
         st.st_size = self.size
         st.st_mode = stat.S_IFREG | 0o444
         st.st_nlink = 1
         return st
+
+
+def eagle_file_factory(obj: dict) -> EagleFile:
+    return EagleFile(
+        id=obj['id'],
+        name=obj['name'],
+        folders={EagleFolderID(fid) for fid in obj.get('folders', []) if fid is not None},
+        ext=obj.get('ext', None),
+        is_deleted=obj.get('isDeleted', False),
+        size=obj.get('size', 0),
+        width=obj.get('width', 0),
+        height=obj.get('height', 0),
+        modification_time=obj.get('modificationTime', 0),
+        last_modified=obj.get('lastModified', 0)
+    )
 
 
 class FSStat(fuse.Stat):
