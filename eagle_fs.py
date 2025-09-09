@@ -1,6 +1,6 @@
 #!/usr/bin/env python
-
-import tomllib
+import sys
+import signal
 import logging
 import os
 import stat
@@ -12,7 +12,7 @@ from src.eagle_repository import EagleRepository
 from src.model import FSStat
 
 logger = logging.getLogger("eagle")
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 
 format = "%(asctime)s [%(levelname)s] %(message)s"
 logging.basicConfig(format=format)
@@ -33,13 +33,13 @@ class EagleFS(Fuse):
             action="store"
         )
 
-
     def main(self, args=None):
         logger.info("Mounting EagleFS...")
 
         eagle_lib_path = self.cmdline[0].eagle_lib_path
         self.repository = EagleRepository(eagle_lib_path)
         self.repository.load()
+        self.repository.start()
         Fuse.main(self)
 
     def getattr(self, path):
@@ -95,17 +95,23 @@ class EagleFS(Fuse):
             print("error:", e)
             return -errno.ENOENT
 
-def main():
+    def fsdestroy(self):
+        self.repository.close()
+
+async def main():
     usage="""
 EagleFS: FUSE filesystem for Eagle Library
 
 """ + Fuse.fusage
     server = EagleFS(version="%prog " + fuse.__version__,
                      usage=usage,
-                     dash_s_do='setsingle')
+                     dash_s_do='undef')
 
     server.parse(errex=1)
     server.main()
 
+
+import asyncio
+
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())

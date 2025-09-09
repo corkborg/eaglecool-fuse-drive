@@ -1,3 +1,4 @@
+from pathlib import Path
 import unittest
 from unittest.mock import patch, MagicMock, Mock
 
@@ -44,7 +45,7 @@ class TestClass(unittest.TestCase):
         self.assertIsInstance(r, EagleFile)
         self.assertEqual(r.id, "MF7X11V2AM3EP")
         self.assertEqual(r.name, "orangepng")
-        self.assertEqual(r.folders, ["MF7X2TP5LYADS"])
+        self.assertEqual(r.folders, {"MF7X2TP5LYADS"})
         self.assertEqual(r.ext, "png")
         self.assertEqual(r.size, 3026)
         self.assertEqual(r.width, 66)
@@ -58,3 +59,27 @@ class TestClass(unittest.TestCase):
         self.assertIsInstance(r, EagleFolder)
         self.assertEqual(r.id, "MF7X2TP5LYADS")
         self.assertEqual(r.name, "folder")
+
+    def test_extract_image_id_from_path01(self):
+        r = self.repo.extract_image_id(
+            Path('images') / 'FILEID.info'
+        )
+        self.assertEqual(r, 'FILEID')
+
+    def test_extract_image_id_from_path02(self):
+        r = self.repo.extract_image_id(
+            Path('bbbb') / 'FILEID.info'
+        )
+        self.assertIsNone(r)
+
+    def test_extract_image_id_from_path03(self):
+        r = self.repo.extract_image_id(
+            Path('images') / 'FILEID'
+        )
+        self.assertIsNone(r)
+
+    def test_extract_image_id_from_path04(self):
+        r = self.repo.extract_image_id(Path('images'))
+        self.assertIsNone(r)
+
+
