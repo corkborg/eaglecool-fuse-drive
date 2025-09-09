@@ -1,6 +1,4 @@
 #!/usr/bin/env python
-import sys
-import signal
 import logging
 import os
 import stat

@@ -1,9 +1,9 @@
 from pathlib import Path
 import unittest
-from unittest.mock import patch, MagicMock, Mock
+from unittest.mock import patch
 
 from src.eagle_repository import EagleRepository
-from src.model import EagleFile, EagleFolder, EagleFolderID
+from src.model import EagleFile, EagleFolder
 
 
 class TestClass(unittest.TestCase):
