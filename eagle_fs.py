@@ -96,7 +96,8 @@ class EagleFS(Fuse):
     def fsdestroy(self):
         self.repository.close()
 
-async def main():
+
+def main():
     usage="""
 EagleFS: FUSE filesystem for Eagle Library
 
@@ -108,8 +109,5 @@ EagleFS: FUSE filesystem for Eagle Library
     server.parse(errex=1)
     server.main()
 
-
-import asyncio
-
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()
