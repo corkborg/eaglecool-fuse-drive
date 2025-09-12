@@ -10,7 +10,7 @@ from src.eagle_repository import EagleRepository
 from src.model import FSStat
 
 logger = logging.getLogger("eagle")
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 format = "%(asctime)s [%(levelname)s] %(message)s"
 logging.basicConfig(format=format)
@@ -32,7 +32,7 @@ class EagleFS(Fuse):
         )
 
     def main(self, args=None):
-        logger.info("Mounting EagleFS...")
+        logger.debug("Mounting EagleFS...")
 
         eagle_lib_path = self.cmdline[0].eagle_lib_path
         self.repository = EagleRepository(eagle_lib_path)
@@ -41,7 +41,7 @@ class EagleFS(Fuse):
         Fuse.main(self)
 
     def getattr(self, path):
-        logger.info("getattr %s", path)
+        logger.debug("getattr %s", path)
 
         if path == '/':
             st = FSStat()
@@ -62,7 +62,7 @@ class EagleFS(Fuse):
         """
         ディレクトリ内のファイル一覧
         """
-        logger.info("readdir %s %s", path, offset)
+        logger.debug("readdir %s %s", path, offset)
         for r in  '.', '..':
             yield fuse.Direntry(r)
         for r in self.repository.list_filenames(path):
@@ -72,7 +72,7 @@ class EagleFS(Fuse):
         """
         ファイルを開くにあたって権限周りの確認
         """
-        logger.info("open: %s %s", path, flags)
+        logger.debug("open: %s %s", path, flags)
 
         try:
             self.repository.get_metadata(path)
@@ -85,7 +85,7 @@ class EagleFS(Fuse):
 
     def read(self, path, size, offset):
         """ファイルの中身を返す"""
-        logger.info("read %s %s %s", path, size, offset)
+        logger.debug("read %s %s %s", path, size, offset)
         try:
             print("read", path, size, offset)
             return self.repository.get_binary(path, size, offset)
