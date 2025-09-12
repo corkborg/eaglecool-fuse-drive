@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import logging
 import os
+from pathlib import Path
 import stat
 import errno
 import fuse
@@ -32,9 +33,13 @@ class EagleFS(Fuse):
         )
 
     def main(self, args=None):
-        logger.debug("Mounting EagleFS...")
+        eagle_lib_path = Path(self.cmdline[0].eagle_lib_path)
+        logger.info("Mounting EagleFS... %s to %s", eagle_lib_path.name, self.fuse_args.mountpoint)
 
-        eagle_lib_path = self.cmdline[0].eagle_lib_path
+        if 'debug' in self.fuse_args.optlist:
+            logger.setLevel(logging.DEBUG)
+            logger.debug("Debug logging enabled")
+
         self.repository = EagleRepository(eagle_lib_path)
         self.repository.load()
         self.repository.start()
