@@ -9,8 +9,10 @@ EagleFolderID = NewType('EagleFolderID', str)
 EagleFileID = NewType('EagleFileID', str)
 EagleRootFolderID = EagleFolderID('root')
 
+
 def sanitize_filename(filename: str) -> str:
-    return filename.replace('/', '_')
+    return filename \
+        .replace('/', '_')
 
 
 @dataclass
