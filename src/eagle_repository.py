@@ -65,7 +65,6 @@ class EagleRepository(threading.Thread):
         delete_list = []
         for file_id in self.indexed_files_by_folderid.get(folder_id, []):
             file = self.indexed_files[file_id]
-
             if folder_id not in file.folders or file.is_deleted:
                 delete_list.append((folder_id, file_id))
                 continue
@@ -164,6 +163,7 @@ class EagleRepository(threading.Thread):
 
             self.indexed_files[file.id] = file
             if len(file.folders) == 0:
+                file.folders = {EagleRootFolderID}
                 self.indexed_files_by_folderid[EagleRootFolderID] |= {file.id}
             else:
                 for fid in file.folders:
