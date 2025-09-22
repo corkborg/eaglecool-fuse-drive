@@ -1,7 +1,9 @@
 
+
 import os
 import stat
 import fuse
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import NewType
 
@@ -20,7 +22,7 @@ class EagleFolder:
     id: EagleFolderID
     name: str
     children: list['EagleFolder']
-    modification_time: int
+    modification_time: datetime
 
     def normalize_name(self):
         return sanitize_filename(f'{self.name}_{self.id}')
@@ -29,12 +31,24 @@ class EagleFolder:
         st = FSStat()
         st.st_uid =  os.getuid()
         st.st_gid =  os.getgid()
-        st.st_atime = self.modification_time
-        st.st_mtime = self.modification_time
+        st.st_atime = int(self.modification_time.timestamp())
+        st.st_mtime = int(self.modification_time.timestamp())
         #st.st_ctime = self.modificationTime
         st.st_mode = stat.S_IFDIR | 0o755
         st.st_nlink = 2
         return st
+
+
+def eagle_folder_factory(obj: dict) -> EagleFolder:
+    """
+    Create EagleFolder from dict (parsed JSON)
+    """
+    return EagleFolder(
+        id=EagleFolderID(obj['id']),
+        name=obj['name'],
+        children=[eagle_folder_factory(child) for child in obj.get('children', [])],
+        modification_time=datetime.fromtimestamp(obj.get('modificationTime', 0) / 1000, tz=timezone.utc)
+    )
 
 
 @dataclass
@@ -47,8 +61,8 @@ class EagleFile:
     size: int
     width: int
     height: int
-    modification_time: int
-    last_modified: int
+    modification_time: datetime
+    last_modified: datetime
 
     def normalize_name(self):
         return sanitize_filename(f'{self.name}_{self.id}.{self.ext}')
@@ -60,9 +74,9 @@ class EagleFile:
         st = FSStat()
         st.st_uid =  os.getuid()
         st.st_gid =  os.getgid()
-        st.st_atime = self.last_modified
-        st.st_mtime = self.modification_time
-        st.st_ctime = self.last_modified
+        st.st_atime = int(self.last_modified.timestamp())
+        st.st_mtime = int(self.modification_time.timestamp())
+        st.st_ctime = int(self.last_modified.timestamp())
         st.st_size = self.size
         st.st_mode = stat.S_IFREG | 0o444
         st.st_nlink = 1
@@ -70,6 +84,8 @@ class EagleFile:
 
 
 def eagle_file_factory(obj: dict) -> EagleFile:
+    """
+    Create EagleFile from dict (parsed JSON)"""
     return EagleFile(
         id=obj['id'],
         name=obj['name'],
@@ -79,8 +95,8 @@ def eagle_file_factory(obj: dict) -> EagleFile:
         size=obj.get('size', 0),
         width=obj.get('width', 0),
         height=obj.get('height', 0),
-        modification_time=obj.get('modificationTime', 0),
-        last_modified=obj.get('lastModified', 0)
+        modification_time=datetime.fromtimestamp(obj.get('modificationTime', 0) / 1000, tz=timezone.utc),
+        last_modified=datetime.fromtimestamp(obj.get('lastModified', 0) / 1000, tz=timezone.utc)
     )
 
 

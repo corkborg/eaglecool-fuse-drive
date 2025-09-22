@@ -1,12 +1,13 @@
-from datetime import datetime, timedelta
+
 import json
 import logging
 import threading
 from collections import defaultdict
 from pathlib import Path
+from datetime import datetime, timedelta
 from watchfiles import watch, Change
 
-from src.model import EagleFile, EagleFileID, EagleFolder, EagleFolderID, EagleRootFolderID, eagle_file_factory
+from src.model import EagleFile, EagleFileID, EagleFolder, EagleFolderID, EagleRootFolderID, eagle_file_factory, eagle_folder_factory
 
 logger = logging.getLogger("eagle")
 
@@ -125,16 +126,7 @@ class EagleRepository(threading.Thread):
         """
         with open(self.library_path / "metadata.json", "r") as f:
             obj = json.load(f)
-
-        def parse_folder(folder_obj) -> EagleFolder:
-            return EagleFolder(
-                id=folder_obj['id'],
-                name=folder_obj['name'],
-                children=[parse_folder(child) for child in folder_obj.get('children', [])],
-                modification_time=folder_obj.get('modificationTime', 0)
-            )
-
-        self.folder_tree = [parse_folder(folder) for folder in obj['folders']]
+        self.folder_tree = [eagle_folder_factory(folder) for folder in obj['folders']]
 
         def index_folder(folder: EagleFolder):
             self.indexed_folders[folder.id] = folder
