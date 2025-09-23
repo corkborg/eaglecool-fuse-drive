@@ -1,11 +1,13 @@
+
 import json
 import logging
 import threading
 from collections import defaultdict
 from pathlib import Path
+from datetime import datetime, timedelta
 from watchfiles import watch, Change
 
-from src.model import EagleFile, EagleFileID, EagleFolder, EagleFolderID, EagleRootFolderID, eagle_file_factory
+from src.model import EagleFile, EagleFileID, EagleFolder, EagleFolderID, EagleRootFolderID, eagle_file_factory, eagle_folder_factory
 
 logger = logging.getLogger("eagle")
 
@@ -20,11 +22,14 @@ class EagleRepository(threading.Thread):
         threading.Thread.__init__(self)
 
         self.library_path = Path(library_path)
-        self.folders: list[EagleFolder] = []
+
+        self.folder_tree: list[EagleFolder] = []
         self.indexed_folders: dict[EagleFolderID, EagleFolder] = {}
         self.indexed_files: dict[EagleFileID, EagleFile] = {}
-
         self.indexed_files_by_folderid: defaultdict[EagleFolderID, set[EagleFileID]] = defaultdict(set)
+
+        # Last full refresh time
+        self.latest_refresh_time = datetime.now()
 
         # Event to stop monitoring
         self.stop_event = threading.Event()
@@ -42,6 +47,7 @@ class EagleRepository(threading.Thread):
         """
         load metadata from Eagle library
         """
+        self.latest_refresh_time = datetime.now()
         self.load_folders()
         self.load_files()
 
@@ -51,7 +57,7 @@ class EagleRepository(threading.Thread):
         """
         files = []
         if path == '/':
-            for folder in self.folders:
+            for folder in self.folder_tree:
                 files.append(folder.normalize_name())
             folder_id = EagleRootFolderID
         else:
@@ -119,22 +125,13 @@ class EagleRepository(threading.Thread):
         """
         with open(self.library_path / "metadata.json", "r") as f:
             obj = json.load(f)
-
-        def parse_folder(folder_obj) -> EagleFolder:
-            return EagleFolder(
-                id=folder_obj['id'],
-                name=folder_obj['name'],
-                children=[parse_folder(child) for child in folder_obj.get('children', [])],
-                modification_time=folder_obj.get('modificationTime', 0)
-            )
-
-        self.folders = [parse_folder(folder) for folder in obj['folders']]
+        self.folder_tree = [eagle_folder_factory(folder) for folder in obj['folders']]
 
         def index_folder(folder: EagleFolder):
             self.indexed_folders[folder.id] = folder
             for child in folder.children:
                 index_folder(child)
-        for folder in self.folders:
+        for folder in self.folder_tree:
             index_folder(folder)
 
     def load_files(self):
@@ -202,7 +199,7 @@ class EagleRepository(threading.Thread):
                         return inner_search_path(folder.children, path_parts[1:])
             return None
         path_parts = str(path[1:]).split('/')
-        return inner_search_path(self.folders, path_parts)
+        return inner_search_path(self.folder_tree, path_parts)
 
     def watchfiles(self):
         for changes in watch(self.library_path, step=200, stop_event=self.stop_event):
@@ -215,6 +212,10 @@ class EagleRepository(threading.Thread):
 
             logger.debug("changes: %s", new_changes)
             self.process_changes(set(new_changes))
+
+            # 以前の実行から時間が経っている場合再度全ロードを行う
+            if self.latest_refresh_time - datetime.now() > timedelta(minutes=10):
+                self.load()
 
     def create_image_metadata_path(self, file_id: EagleFileID):
         return self.library_path / 'images' / f'{file_id}.info' / 'metadata.json'
