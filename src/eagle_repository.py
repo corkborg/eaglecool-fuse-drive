@@ -4,7 +4,7 @@ import logging
 import threading
 from collections import defaultdict
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from watchfiles import watch, Change
 
 from src.model import EagleFile, EagleFileID, EagleFolder, EagleFolderID, EagleRootFolderID, eagle_file_factory, eagle_folder_factory
@@ -23,10 +23,13 @@ class EagleRepository(threading.Thread):
 
         self.library_path = Path(library_path)
 
-        self.folder_tree: list[EagleFolder] = []
+        #self.folder_tree: list[EagleFolder] = []
+
         self.indexed_folders: dict[EagleFolderID, EagleFolder] = {}
         self.indexed_files: dict[EagleFileID, EagleFile] = {}
-        self.indexed_files_by_folderid: defaultdict[EagleFolderID, set[EagleFileID]] = defaultdict(set)
+        # self.indexed_files_by_folderid: defaultdict[EagleFolderID, set[EagleFileID]] = defaultdict(set)
+
+        #self.mtime_cache: dict[EagleFolderID, datetime] = {}
 
         # Last full refresh time
         self.latest_refresh_time = datetime.now()
@@ -51,35 +54,17 @@ class EagleRepository(threading.Thread):
         self.load_folders()
         self.load_files()
 
-    def list_filenames(self, path = '/'):
+    def list_files(self, path = '/') -> list[EagleFile | EagleFolder]:
         """
         list filenames in folder
         """
-        files = []
-        if path == '/':
-            for folder in self.folder_tree:
-                files.append(folder.normalize_name())
-            folder_id = EagleRootFolderID
-        else:
-            folder_id = self.search_folder(path)
-            if folder_id is None:
-                raise Exception(f"Folder not found: {path}")
 
-            for folder in self.indexed_folders[folder_id].children:
-                files.append(folder.normalize_name())
+        root_folder = self.indexed_folders[EagleRootFolderID]
+        folder_id = root_folder.solve_folder(path)
+        if folder_id is None:
+            raise Exception(f"Folder not found: {path}")
 
-        delete_list = []
-        for file_id in self.indexed_files_by_folderid.get(folder_id, []):
-
-            file = self.indexed_files[file_id]
-            if folder_id not in file.folders or file.is_deleted:
-                delete_list.append((folder_id, file_id))
-                continue
-
-            files.append(file.normalize_name())
-
-        for delete in delete_list:
-            self.indexed_files_by_folderid[delete[0]] -= {delete[1]}
+        files = [*root_folder.sub_folders, *root_folder.files]
         return files
 
     def get_metadata(self, path: str) -> EagleFile | EagleFolder:
@@ -126,11 +111,19 @@ class EagleRepository(threading.Thread):
         """
         with open(self.library_path / "metadata.json", "r") as f:
             obj = json.load(f)
-        self.folder_tree = [eagle_folder_factory(folder) for folder in obj['folders']]
+        folder_tree = [eagle_folder_factory(folder) for folder in obj['folders']]
+        root_folder = EagleFolder(
+            id=EagleRootFolderID,
+            name='root',
+            sub_folders=folder_tree,
+            raw_modification_time=datetime.fromtimestamp(obj.get('modificationTime', 0) / 1000, tz=timezone.utc),
+            files=[]
+        )
+        self.folder_tree = [root_folder]
 
         def index_folder(folder: EagleFolder):
             self.indexed_folders[folder.id] = folder
-            for child in folder.children:
+            for child in folder.sub_folders:
                 index_folder(child)
         for folder in self.folder_tree:
             index_folder(folder)
@@ -159,48 +152,23 @@ class EagleRepository(threading.Thread):
             if file.is_deleted:
                 continue
 
-            self.indexed_files[file.id] = file
-            if len(file.folders) == 0:
-                file.folders = {EagleRootFolderID}
-                self.indexed_files_by_folderid[EagleRootFolderID] |= {file.id}
-            else:
-                for fid in file.folders:
-                    if fid is None:
-                        continue
-                    self.indexed_files_by_folderid[fid] |= {file.id}
+            for folder_id in file.folders:
+                folder = self.indexed_folders.get(folder_id)
+                if folder is None:
+                    logger.warning(f"Folder not found: {folder_id} for file {file.id}")
+                    continue
+                folder.append_file(file)
 
     def search_file(self, path: str) -> EagleFileID | None:
         """
         Searching for files in the Eagle library
         """
-        if path == '/':
-            return None
-        path_parts = str(path[1:]).split('/')
-        file_name = path_parts[-1]
-        folder_path = '/' + '/'.join(path_parts[:-1])
-        folder_id = self.search_folder(folder_path)
-        if folder_id is None:
-            return None
-        for file_id in self.indexed_files_by_folderid.get(folder_id, []):
-            file = self.indexed_files[file_id]
-            if file.normalize_name() == file_name:
-                return file.id
-        return None
+        root_folder = self.indexed_folders[EagleRootFolderID]
+        return root_folder.solve_file(path)
 
-    def search_folder(self, path):
-        if path == '/':
-            return EagleRootFolderID
-        def inner_search_path(folders: list[EagleFolder], path_parts) -> EagleFolderID | None:
-            part = path_parts[0]
-            for folder in folders:
-                if folder.normalize_name() == part:
-                    if len(path_parts) == 1:
-                        return folder.id
-                    else:
-                        return inner_search_path(folder.children, path_parts[1:])
-            return None
-        path_parts = str(path[1:]).split('/')
-        return inner_search_path(self.folder_tree, path_parts)
+    def search_folder(self, path) -> EagleFolderID | None:
+        root_folder = self.indexed_folders[EagleRootFolderID]
+        return root_folder.solve_folder(path)
 
     def watchfiles(self):
         for changes in watch(self.library_path, step=200, stop_event=self.stop_event):
@@ -268,5 +236,5 @@ class EagleRepository(threading.Thread):
             obj = json.load(f)
         file = eagle_file_factory(obj)
         self.indexed_files[file.id] = file
-        for fid in file.folders:
-            self.indexed_files_by_folderid[fid] |= {file.id}
+        #for fid in file.folders:
+        #    self.indexed_files_by_folderid[fid] |= {file.id}

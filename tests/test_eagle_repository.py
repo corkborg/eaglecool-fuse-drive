@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import cast
 import unittest
 from unittest.mock import patch
 
@@ -13,7 +14,7 @@ class TestClass(unittest.TestCase):
         self.repo.load()
 
     def test01(self):
-        fs = self.repo.list_filenames("/folder_MF7X2TP5LYADS")
+        fs = self.repo.list_files("/folder_MF7X2TP5LYADS")
         self.assertIn("pink_gif_MF7X1TY7F0LWI.gif", fs)
         self.assertIn("orangepng_MF7X11V2AM3EP.png", fs)
 
@@ -42,6 +43,7 @@ class TestClass(unittest.TestCase):
         get metadata of file
         """
         r = self.repo.get_metadata("/folder_MF7X2TP5LYADS/orangepng_MF7X11V2AM3EP.png")
+        r = cast(EagleFile, r)
         self.assertIsInstance(r, EagleFile)
         self.assertEqual(r.id, "MF7X11V2AM3EP")
         self.assertEqual(r.name, "orangepng")

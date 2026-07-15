@@ -70,8 +70,8 @@ class EagleFS(Fuse):
         logger.debug("readdir %s %s", path, offset)
         for r in  '.', '..':
             yield fuse.Direntry(r)
-        for r in self.repository.list_filenames(path):
-            yield fuse.Direntry(r)
+        for r in self.repository.list_files(path):
+            yield fuse.Direntry(r.name)
 
     def open(self, path, flags):
         """
