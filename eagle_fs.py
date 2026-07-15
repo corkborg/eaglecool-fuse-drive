@@ -79,13 +79,14 @@ class EagleFS(Fuse):
         """
         logger.debug("readdir %s %s", path, offset)
         try:
-            filenames = self.repository.list_filenames(path)
+            files = self.repository.list_files(path)
         except FileNotFoundError:
             return -errno.ENOENT
         except Exception:
             logger.exception("readdir failed: %s", path)
             return -errno.EIO
-        return [fuse.Direntry(r) for r in ['.', '..', *filenames]]
+        return [fuse.Direntry('.'), fuse.Direntry('..')] \
+            + [fuse.Direntry(f.normalize_name()) for f in files]
 
     def open(self, path, flags):
         """

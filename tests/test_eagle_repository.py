@@ -1,11 +1,12 @@
 from pathlib import Path
+from typing import cast
 import unittest
 from unittest.mock import patch
 
 from watchfiles import Change
 
 from src.eagle_repository import EagleRepository
-from src.model import EagleFile, EagleFileID, EagleFolder, EagleFolderID
+from src.model import EagleFile, EagleFileID, EagleFolder, EagleFolderID, eagle_file_factory
 
 
 class TestClass(unittest.TestCase):
@@ -15,9 +16,10 @@ class TestClass(unittest.TestCase):
         self.repo.load()
 
     def test01(self):
-        fs = self.repo.list_filenames("/folder_MF7X2TP5LYADS")
-        self.assertIn("pink_gif_MF7X1TY7F0LWI.gif", fs)
-        self.assertIn("orangepng_MF7X11V2AM3EP.png", fs)
+        fs = self.repo.list_files("/folder_MF7X2TP5LYADS")
+        names = [f.normalize_name() for f in fs]
+        self.assertIn("pink_gif_MF7X1TY7F0LWI.gif", names)
+        self.assertIn("orangepng_MF7X11V2AM3EP.png", names)
 
     def test_get_binary01(self):
         r = self.repo.get_binary("/folder_MF7X2TP5LYADS/orangepng_MF7X11V2AM3EP.png", 100, 0)
@@ -44,6 +46,7 @@ class TestClass(unittest.TestCase):
         get metadata of file
         """
         r = self.repo.get_metadata("/folder_MF7X2TP5LYADS/orangepng_MF7X11V2AM3EP.png")
+        r = cast(EagleFile, r)
         self.assertIsInstance(r, EagleFile)
         self.assertEqual(r.id, "MF7X11V2AM3EP")
         self.assertEqual(r.name, "orangepng")
@@ -91,43 +94,38 @@ class TestClass(unittest.TestCase):
         self.repo.process_changes({(Change.modified, Path('images'))})
         self.repo.process_changes({(Change.modified, Path('tags.json'))})
 
-    def test_process_changes_removes_deleted_file_from_folder_index(self):
+    def test_process_changes_removes_deleted_file(self):
         """
-        削除されたファイルのIDがフォルダ索引からも消える
+        削除されたファイルが索引とフォルダから消える
         """
-        folder_id = EagleFolderID("MF7X2TP5LYADS")
-        self.repo._state.indexed_files_by_folderid[folder_id].add(EagleFileID("FAKEID123"))
+        folder = self.repo._state.indexed_folders[EagleFolderID("MF7X2TP5LYADS")]
+        fake = eagle_file_factory({
+            'id': 'FAKEID123', 'name': 'fake', 'ext': 'png',
+            'folders': ['MF7X2TP5LYADS'],
+        })
+        self.repo._state.indexed_files[EagleFileID("FAKEID123")] = fake
+        folder.append_file(fake)
         self.repo.process_changes({
             (Change.deleted, Path('images') / 'FAKEID123.info' / 'metadata.json')
         })
-        self.assertNotIn(
-            "FAKEID123", self.repo._state.indexed_files_by_folderid[folder_id])
-        # 索引が壊れていても readdir 相当が KeyError にならないこと
-        fs = self.repo.list_filenames("/folder_MF7X2TP5LYADS")
-        self.assertIn("orangepng_MF7X11V2AM3EP.png", fs)
-
-    def test_list_filenames_ignores_dangling_file_id(self):
-        """
-        索引に残った不明なIDを無視して一覧を返せる
-        """
-        folder_id = EagleFolderID("MF7X2TP5LYADS")
-        self.repo._state.indexed_files_by_folderid[folder_id].add(EagleFileID("DANGLING"))
-        fs = self.repo.list_filenames("/folder_MF7X2TP5LYADS")
-        self.assertIn("orangepng_MF7X11V2AM3EP.png", fs)
+        self.assertNotIn("FAKEID123", self.repo._state.indexed_files)
+        names = [f.normalize_name() for f in self.repo.list_files("/folder_MF7X2TP5LYADS")]
+        self.assertNotIn("fake_FAKEID123.png", names)
+        self.assertIn("orangepng_MF7X11V2AM3EP.png", names)
 
     def test_process_changes_reloads_folders(self):
         """
-        metadata.json の変更でフォルダツリーを再読込する
+        metadata.json の変更でフォルダツリーを再構築してもファイルが残る
         """
         self.repo.process_changes({(Change.modified, Path('metadata.json'))})
-        fs = self.repo.list_filenames("/")
-        self.assertIn("text_MF7X2MAQ0AQ13.txt", fs)
-        fs = self.repo.list_filenames("/folder_MF7X2TP5LYADS")
-        self.assertIn("orangepng_MF7X11V2AM3EP.png", fs)
+        names = [f.normalize_name() for f in self.repo.list_files("/")]
+        self.assertIn("text_MF7X2MAQ0AQ13.txt", names)
+        names = [f.normalize_name() for f in self.repo.list_files("/folder_MF7X2TP5LYADS")]
+        self.assertIn("orangepng_MF7X11V2AM3EP.png", names)
 
-    def test_list_filenames_not_found(self):
+    def test_list_files_not_found(self):
         with self.assertRaises(FileNotFoundError):
-            self.repo.list_filenames("/no_such_folder")
+            self.repo.list_files("/no_such_folder")
 
     def test_get_metadata_not_found(self):
         with self.assertRaises(FileNotFoundError):
