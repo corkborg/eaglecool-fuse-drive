@@ -65,6 +65,8 @@ class EagleFile:
     last_modified: datetime
 
     def normalize_name(self):
+        if self.ext is None:
+            return sanitize_filename(f'{self.name}_{self.id}')
         return sanitize_filename(f'{self.name}_{self.id}.{self.ext}')
 
     def folder_name(self):

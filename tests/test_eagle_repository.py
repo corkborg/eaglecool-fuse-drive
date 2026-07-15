@@ -2,8 +2,10 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
+from watchfiles import Change
+
 from src.eagle_repository import EagleRepository
-from src.model import EagleFile, EagleFolder
+from src.model import EagleFile, EagleFileID, EagleFolder, EagleFolderID
 
 
 class TestClass(unittest.TestCase):
@@ -81,5 +83,54 @@ class TestClass(unittest.TestCase):
     def test_extract_image_id_from_path04(self):
         r = self.repo.extract_image_id(Path('images'))
         self.assertIsNone(r)
+
+    def test_process_changes_ignores_non_image_paths(self):
+        """
+        images ディレクトリ自体の変更で落ちない
+        """
+        self.repo.process_changes({(Change.modified, Path('images'))})
+        self.repo.process_changes({(Change.modified, Path('tags.json'))})
+
+    def test_process_changes_removes_deleted_file_from_folder_index(self):
+        """
+        削除されたファイルのIDがフォルダ索引からも消える
+        """
+        folder_id = EagleFolderID("MF7X2TP5LYADS")
+        self.repo._state.indexed_files_by_folderid[folder_id].add(EagleFileID("FAKEID123"))
+        self.repo.process_changes({
+            (Change.deleted, Path('images') / 'FAKEID123.info' / 'metadata.json')
+        })
+        self.assertNotIn(
+            "FAKEID123", self.repo._state.indexed_files_by_folderid[folder_id])
+        # 索引が壊れていても readdir 相当が KeyError にならないこと
+        fs = self.repo.list_filenames("/folder_MF7X2TP5LYADS")
+        self.assertIn("orangepng_MF7X11V2AM3EP.png", fs)
+
+    def test_list_filenames_ignores_dangling_file_id(self):
+        """
+        索引に残った不明なIDを無視して一覧を返せる
+        """
+        folder_id = EagleFolderID("MF7X2TP5LYADS")
+        self.repo._state.indexed_files_by_folderid[folder_id].add(EagleFileID("DANGLING"))
+        fs = self.repo.list_filenames("/folder_MF7X2TP5LYADS")
+        self.assertIn("orangepng_MF7X11V2AM3EP.png", fs)
+
+    def test_process_changes_reloads_folders(self):
+        """
+        metadata.json の変更でフォルダツリーを再読込する
+        """
+        self.repo.process_changes({(Change.modified, Path('metadata.json'))})
+        fs = self.repo.list_filenames("/")
+        self.assertIn("text_MF7X2MAQ0AQ13.txt", fs)
+        fs = self.repo.list_filenames("/folder_MF7X2TP5LYADS")
+        self.assertIn("orangepng_MF7X11V2AM3EP.png", fs)
+
+    def test_list_filenames_not_found(self):
+        with self.assertRaises(FileNotFoundError):
+            self.repo.list_filenames("/no_such_folder")
+
+    def test_get_metadata_not_found(self):
+        with self.assertRaises(FileNotFoundError):
+            self.repo.get_metadata("/no_such_folder/no_such_file.png")
 
 
