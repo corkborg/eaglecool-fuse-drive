@@ -67,8 +67,8 @@ class EagleFolder:
         st = FSStat()
         st.st_uid =  os.getuid()
         st.st_gid =  os.getgid()
-        # st.st_atime = int(self.modification_time.timestamp()) # アクセス日時
-        # st.st_mtime = int(self.modification_time.timestamp())
+        st.st_atime = int(self.raw_modification_time.timestamp()) # アクセス日時
+        st.st_mtime = int(self.raw_modification_time.timestamp())
         st.st_ctime = int(self.raw_modification_time.timestamp())
         st.st_mode = stat.S_IFDIR | 0o755
         st.st_nlink = 2
