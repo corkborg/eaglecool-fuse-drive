@@ -13,8 +13,8 @@ from src.model import FSStat
 logger = logging.getLogger("eagle")
 logger.setLevel(logging.INFO)
 
-format = "%(asctime)s [%(levelname)s] %(message)s"
-logging.basicConfig(format=format)
+log_format = "%(asctime)s [%(levelname)s] %(message)s"
+logging.basicConfig(format=log_format)
 
 if not hasattr(fuse, '__version__'):
     raise RuntimeError("your fuse-py doesn't know of fuse.__version__, probably it's too old.")
@@ -42,8 +42,16 @@ class EagleFS(Fuse):
 
         self.repository = EagleRepository(eagle_lib_path)
         self.repository.load()
-        self.repository.start()
         Fuse.main(self)
+
+    def fsinit(self):
+        # fuse-python はデーモン化のために fork し、fork 前に起動したスレッドは
+        # 子プロセスへ引き継がれない。監視スレッドは fork 後に呼ばれる
+        # fsinit で起動する必要がある。
+        self.repository.start()
+
+    def fsdestroy(self):
+        self.repository.close()
 
     def getattr(self, path):
         logger.debug("getattr %s", path)
@@ -58,20 +66,26 @@ class EagleFS(Fuse):
 
         try:
             file = self.repository.get_metadata(path)
-            st = file.to_stat()
-            return st
-        except Exception:
+            return file.to_stat()
+        except FileNotFoundError:
             return -errno.ENOENT
+        except Exception:
+            logger.exception("getattr failed: %s", path)
+            return -errno.EIO
 
     def readdir(self, path, offset):
         """
         ディレクトリ内のファイル一覧
         """
         logger.debug("readdir %s %s", path, offset)
-        for r in  '.', '..':
-            yield fuse.Direntry(r)
-        for r in self.repository.list_filenames(path):
-            yield fuse.Direntry(r)
+        try:
+            filenames = self.repository.list_filenames(path)
+        except FileNotFoundError:
+            return -errno.ENOENT
+        except Exception:
+            logger.exception("readdir failed: %s", path)
+            return -errno.EIO
+        return [fuse.Direntry(r) for r in ['.', '..', *filenames]]
 
     def open(self, path, flags):
         """
@@ -81,8 +95,11 @@ class EagleFS(Fuse):
 
         try:
             self.repository.get_metadata(path)
-        except Exception:
+        except FileNotFoundError:
             return -errno.ENOENT
+        except Exception:
+            logger.exception("open failed: %s", path)
+            return -errno.EIO
         accmode = os.O_RDONLY | os.O_WRONLY | os.O_RDWR
         # 読み込み専用で開くことを要求されているか確認
         if (flags & accmode) != os.O_RDONLY:
@@ -92,14 +109,12 @@ class EagleFS(Fuse):
         """ファイルの中身を返す"""
         logger.debug("read %s %s %s", path, size, offset)
         try:
-            print("read", path, size, offset)
             return self.repository.get_binary(path, size, offset)
-        except Exception as e:
-            print("error:", e)
+        except FileNotFoundError:
             return -errno.ENOENT
-
-    def fsdestroy(self):
-        self.repository.close()
+        except Exception:
+            logger.exception("read failed: %s", path)
+            return -errno.EIO
 
 
 def main():
