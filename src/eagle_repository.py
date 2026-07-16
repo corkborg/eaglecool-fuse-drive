@@ -4,7 +4,7 @@ import logging
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from watchfiles import watch, Change
 
 from src.model import EagleFile, EagleFileID, EagleFolder, EagleFolderID, EagleRootFolderID, eagle_file_factory, eagle_folder_factory
@@ -13,6 +13,20 @@ logger = logging.getLogger("eagle")
 
 # 監視スレッドがクラッシュした際に再起動するまでの秒数
 WATCH_RETRY_INTERVAL = 5
+
+
+def _make_root_folder(sub_folders: list[EagleFolder] | None = None,
+                      modification_time: datetime | None = None) -> EagleFolder:
+    """
+    ライブラリ全体を包む合成ルートフォルダを作る
+    """
+    return EagleFolder(
+        id=EagleRootFolderID,
+        name='root',
+        sub_folders=sub_folders if sub_folders is not None else [],
+        raw_modification_time=modification_time or datetime.fromtimestamp(0, tz=timezone.utc),
+        files=[],
+    )
 
 
 @dataclass(frozen=True)
@@ -24,10 +38,9 @@ class RepositoryState:
     一括で差し替える。読み取り側は最初に参照をローカルに取り、
     その中だけを見ることでロックなしに一貫したデータを扱える。
     """
-    folder_tree: list[EagleFolder] = field(default_factory=list)
+    root_folder: EagleFolder = field(default_factory=_make_root_folder)
     indexed_folders: dict[EagleFolderID, EagleFolder] = field(default_factory=dict)
     indexed_files: dict[EagleFileID, EagleFile] = field(default_factory=dict)
-    indexed_files_by_folderid: dict[EagleFolderID, set[EagleFileID]] = field(default_factory=dict)
 
 
 class EagleRepository:
@@ -74,36 +87,19 @@ class EagleRepository:
         load metadata from Eagle library
         """
         self.latest_refresh_time = datetime.now()
-        folder_tree, indexed_folders = self._read_folders()
-        indexed_files, files_by_folder = self._read_files()
-        self._state = RepositoryState(
-            folder_tree=folder_tree,
-            indexed_folders=indexed_folders,
-            indexed_files=indexed_files,
-            indexed_files_by_folderid=files_by_folder,
-        )
+        indexed_files = self._read_files()
+        self._state = self._build_state(indexed_files)
 
-    def list_filenames(self, path='/'):
+    def list_files(self, path='/') -> list[EagleFile | EagleFolder]:
         """
-        list filenames in folder
+        list files and folders in folder
         """
         state = self._state
-        if path == '/':
-            folder_id = EagleRootFolderID
-            child_folders = state.folder_tree
-        else:
-            folder_id = self.search_folder(path, state)
-            if folder_id is None:
-                raise FileNotFoundError(f"Folder not found: {path}")
-            child_folders = state.indexed_folders[folder_id].children
-
-        files = [folder.normalize_name() for folder in child_folders]
-        for file_id in state.indexed_files_by_folderid.get(folder_id, ()):
-            file = state.indexed_files.get(file_id)
-            if file is None:
-                continue
-            files.append(file.normalize_name())
-        return files
+        folder_id = state.root_folder.solve_folder(path)
+        if folder_id is None:
+            raise FileNotFoundError(f"Folder not found: {path}")
+        folder = state.indexed_folders[folder_id]
+        return [*folder.sub_folders, *folder.files]
 
     def get_metadata(self, path: str) -> EagleFile | EagleFolder:
         """
@@ -150,61 +146,59 @@ class EagleRepository:
         """
         if state is None:
             state = self._state
-        if path == '/':
-            return None
-        path_parts = str(path[1:]).split('/')
-        file_name = path_parts[-1]
-        folder_path = '/' + '/'.join(path_parts[:-1])
-        folder_id = self.search_folder(folder_path, state)
-        if folder_id is None:
-            return None
-        for file_id in state.indexed_files_by_folderid.get(folder_id, ()):
-            file = state.indexed_files.get(file_id)
-            if file is not None and file.normalize_name() == file_name:
-                return file.id
-        return None
+        return state.root_folder.solve_file(path)
 
     def search_folder(self, path, state: RepositoryState | None = None) -> EagleFolderID | None:
         if state is None:
             state = self._state
-        if path == '/':
-            return EagleRootFolderID
-        def inner_search_path(folders: list[EagleFolder], path_parts) -> EagleFolderID | None:
-            part = path_parts[0]
-            for folder in folders:
-                if folder.normalize_name() == part:
-                    if len(path_parts) == 1:
-                        return folder.id
-                    else:
-                        return inner_search_path(folder.children, path_parts[1:])
-            return None
-        path_parts = str(path[1:]).split('/')
-        return inner_search_path(state.folder_tree, path_parts)
+        return state.root_folder.solve_folder(path)
 
-    def _read_folders(self) -> tuple[list[EagleFolder], dict[EagleFolderID, EagleFolder]]:
+    def _build_state(self, indexed_files: dict[EagleFileID, EagleFile]) -> RepositoryState:
+        """
+        フォルダツリーを構築し、各ファイルを所属フォルダにぶら下げて
+        新しいスナップショットを作る
+        """
+        root_folder, indexed_folders = self._read_folders()
+
+        for file in indexed_files.values():
+            for folder_id in self._file_folder_ids(file):
+                folder = indexed_folders.get(folder_id)
+                if folder is None:
+                    logger.warning("Folder not found: %s for file %s", folder_id, file.id)
+                    continue
+                folder.append_file(file)
+
+        return RepositoryState(
+            root_folder=root_folder,
+            indexed_folders=indexed_folders,
+            indexed_files=indexed_files,
+        )
+
+    def _read_folders(self) -> tuple[EagleFolder, dict[EagleFolderID, EagleFolder]]:
         """
         read folder tree from metadata.json
         """
         with open(self.library_path / "metadata.json", "r") as f:
             obj = json.load(f)
 
-        folder_tree = [eagle_folder_factory(folder) for folder in obj['folders']]
+        root_folder = _make_root_folder(
+            sub_folders=[eagle_folder_factory(folder) for folder in obj['folders']],
+            modification_time=datetime.fromtimestamp(obj.get('modificationTime', 0) / 1000, tz=timezone.utc),
+        )
 
         indexed_folders: dict[EagleFolderID, EagleFolder] = {}
         def index_folder(folder: EagleFolder):
             indexed_folders[folder.id] = folder
-            for child in folder.children:
+            for child in folder.sub_folders:
                 index_folder(child)
-        for folder in folder_tree:
-            index_folder(folder)
-        return folder_tree, indexed_folders
+        index_folder(root_folder)
+        return root_folder, indexed_folders
 
-    def _read_files(self) -> tuple[dict[EagleFileID, EagleFile], dict[EagleFolderID, set[EagleFileID]]]:
+    def _read_files(self) -> dict[EagleFileID, EagleFile]:
         """
         read all file metadata from images directory
         """
         indexed_files: dict[EagleFileID, EagleFile] = {}
-        files_by_folder: dict[EagleFolderID, set[EagleFileID]] = {}
         for f in (self.library_path / 'images').iterdir():
             if f.suffix != '.info' or not f.is_dir():
                 continue
@@ -222,9 +216,7 @@ class EagleRepository:
                 continue
 
             indexed_files[file.id] = file
-            for fid in self._file_folder_ids(file):
-                files_by_folder.setdefault(fid, set()).add(file.id)
-        return indexed_files, files_by_folder
+        return indexed_files
 
     @staticmethod
     def _file_folder_ids(file: EagleFile) -> set[EagleFolderID]:
@@ -267,46 +259,35 @@ class EagleRepository:
 
         # Aggregate changes
         image_ids: set[EagleFileID] = set()
-        reload_folders = False
+        folders_changed = False
         for _, change_path in changes:
             change_path = Path(change_path)
             image_id = self.extract_image_id(change_path)
             if image_id is not None:
                 image_ids.add(EagleFileID(image_id))
             elif change_path == Path('metadata.json'):
-                reload_folders = True
+                folders_changed = True
 
-        if not image_ids and not reload_folders:
+        if not image_ids and not folders_changed:
             return
 
+        # 変更のあったファイルだけディスクから読み直し、
+        # フォルダグラフは丸ごと作り直してスナップショットを差し替える
         indexed_files = dict(state.indexed_files)
-        files_by_folder = {fid: set(ids) for fid, ids in state.indexed_files_by_folderid.items()}
-
         for image_id in image_ids:
-            self._apply_file_update(image_id, indexed_files, files_by_folder)
+            self._apply_file_update(image_id, indexed_files)
 
-        if reload_folders:
-            folder_tree, indexed_folders = self._read_folders()
-        else:
-            folder_tree, indexed_folders = state.folder_tree, state.indexed_folders
-
-        self._state = RepositoryState(
-            folder_tree=folder_tree,
-            indexed_folders=indexed_folders,
-            indexed_files=indexed_files,
-            indexed_files_by_folderid=files_by_folder,
-        )
+        self._state = self._build_state(indexed_files)
 
     def _apply_file_update(self, file_id: EagleFileID,
-                           indexed_files: dict[EagleFileID, EagleFile],
-                           files_by_folder: dict[EagleFolderID, set[EagleFileID]]):
+                           indexed_files: dict[EagleFileID, EagleFile]):
         """
         Update information related to changed file.
         """
         image_metadata = self.create_image_metadata_path(file_id)
 
         if not image_metadata.exists():
-            self._remove_file(file_id, indexed_files, files_by_folder)
+            indexed_files.pop(file_id, None)
             return
 
         try:
@@ -319,19 +300,7 @@ class EagleRepository:
         file = eagle_file_factory(obj)
 
         if file.is_deleted:
-            self._remove_file(file.id, indexed_files, files_by_folder)
+            indexed_files.pop(file.id, None)
             return
 
-        # フォルダ移動に追従できるよう、旧所属を消してから登録し直す
-        self._remove_file(file.id, indexed_files, files_by_folder)
         indexed_files[file.id] = file
-        for fid in self._file_folder_ids(file):
-            files_by_folder.setdefault(fid, set()).add(file.id)
-
-    @staticmethod
-    def _remove_file(file_id: EagleFileID,
-                     indexed_files: dict[EagleFileID, EagleFile],
-                     files_by_folder: dict[EagleFolderID, set[EagleFileID]]):
-        indexed_files.pop(file_id, None)
-        for ids in files_by_folder.values():
-            ids.discard(file_id)
