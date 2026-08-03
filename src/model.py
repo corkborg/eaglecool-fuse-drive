@@ -47,7 +47,7 @@ def eagle_folder_factory(obj: dict) -> EagleFolder:
         id=EagleFolderID(obj['id']),
         name=obj['name'],
         children=[eagle_folder_factory(child) for child in obj.get('children', [])],
-        modification_time=datetime.fromtimestamp(obj.get('modificationTime', 0) / 1000, tz=timezone.utc)
+        modification_time=datetime.fromtimestamp((obj.get('modificationTime') or 0) / 1000, tz=timezone.utc)
     )
 
 
@@ -87,9 +87,18 @@ class EagleFile:
 
 def eagle_file_factory(obj: dict) -> EagleFile:
     """
-    Create EagleFile from dict (parsed JSON)"""
+    Create EagleFile from dict (parsed JSON)
+    """
+
+    modification_time = datetime.fromtimestamp(
+        (obj.get('modificationTime') or 0) / 1000,
+        tz=timezone.utc)
+    last_modified = datetime.fromtimestamp(
+        (obj.get('lastModified') or 0) / 1000,
+        tz=timezone.utc)
+
     return EagleFile(
-        id=obj['id'],
+        id=EagleFileID(obj['id']),
         name=obj['name'],
         folders={EagleFolderID(fid) for fid in obj.get('folders', []) if fid is not None},
         ext=obj.get('ext', None),
@@ -97,8 +106,8 @@ def eagle_file_factory(obj: dict) -> EagleFile:
         size=obj.get('size', 0),
         width=obj.get('width', 0),
         height=obj.get('height', 0),
-        modification_time=datetime.fromtimestamp(obj.get('modificationTime', 0) / 1000, tz=timezone.utc),
-        last_modified=datetime.fromtimestamp(obj.get('lastModified', 0) / 1000, tz=timezone.utc)
+        modification_time=modification_time,
+        last_modified=last_modified
     )
 
 
