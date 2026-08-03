@@ -4,7 +4,7 @@ import logging
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from watchfiles import watch, Change
 
 from src.model import EagleFile, EagleFileID, EagleFolder, EagleFolderID, EagleRootFolderID, eagle_file_factory, eagle_folder_factory
@@ -28,6 +28,45 @@ class RepositoryState:
     indexed_folders: dict[EagleFolderID, EagleFolder] = field(default_factory=dict)
     indexed_files: dict[EagleFileID, EagleFile] = field(default_factory=dict)
     indexed_files_by_folderid: dict[EagleFolderID, set[EagleFileID]] = field(default_factory=dict)
+    folder_effective_time: dict[EagleFolderID, datetime] = field(default_factory=dict)
+
+
+def _compute_folder_effective_times(
+    folder_tree: list[EagleFolder],
+    indexed_files: dict[EagleFileID, EagleFile],
+    files_by_folder: dict[EagleFolderID, set[EagleFileID]],
+    fallback: datetime,
+) -> dict[EagleFolderID, datetime]:
+    """
+    フォルダごとに、自身と配下のファイル・サブフォルダを再帰的に集約した実効時刻を計算する。
+    EagleRootFolderID には、トップレベルのフォルダとルート直下のファイルを集約した値が入る。
+    """
+    times: dict[EagleFolderID, datetime] = {}
+
+    def folder_times(file_ids: 'set[EagleFileID] | tuple[()]') -> list[datetime]:
+        result = []
+        for file_id in file_ids:
+            file = indexed_files.get(file_id)
+            if file is not None:
+                result.append(file.modification_time)
+                result.append(file.last_modified)
+        return result
+
+    def visit(folder: EagleFolder) -> datetime:
+        candidates = [folder.modification_time]
+        candidates.extend(folder_times(files_by_folder.get(folder.id, ())))
+        for child in folder.children:
+            candidates.append(visit(child))
+        effective = max(candidates)
+        times[folder.id] = effective
+        return effective
+
+    root_candidates: list[datetime] = []
+    for folder in folder_tree:
+        root_candidates.append(visit(folder))
+    root_candidates.extend(folder_times(files_by_folder.get(EagleRootFolderID, ())))
+    times[EagleRootFolderID] = max(root_candidates) if root_candidates else fallback
+    return times
 
 
 class EagleRepository:
@@ -76,11 +115,14 @@ class EagleRepository:
         self.latest_refresh_time = datetime.now()
         folder_tree, indexed_folders = self._read_folders()
         indexed_files, files_by_folder = self._read_files()
+        folder_effective_time = _compute_folder_effective_times(
+            folder_tree, indexed_files, files_by_folder, datetime.now(timezone.utc))
         self._state = RepositoryState(
             folder_tree=folder_tree,
             indexed_folders=indexed_folders,
             indexed_files=indexed_files,
             indexed_files_by_folderid=files_by_folder,
+            folder_effective_time=folder_effective_time,
         )
 
     def list_filenames(self, path='/'):
@@ -118,6 +160,13 @@ class EagleRepository:
                 raise FileNotFoundError(f"File not found: {path}")
             return state.indexed_folders[folder_id]
         return state.indexed_files[file_id]
+
+    def get_folder_time(self, folder_id: EagleFolderID) -> datetime:
+        """
+        get effective modification time of a folder (or the root, via EagleRootFolderID),
+        aggregated recursively from its descendant files and subfolders
+        """
+        return self._state.folder_effective_time[folder_id]
 
     def get_binary(self, path: str, size, offset) -> bytes:
         """
@@ -289,11 +338,15 @@ class EagleRepository:
         else:
             folder_tree, indexed_folders = state.folder_tree, state.indexed_folders
 
+        folder_effective_time = _compute_folder_effective_times(
+            folder_tree, indexed_files, files_by_folder, datetime.now(timezone.utc))
+
         self._state = RepositoryState(
             folder_tree=folder_tree,
             indexed_folders=indexed_folders,
             indexed_files=indexed_files,
             indexed_files_by_folderid=files_by_folder,
+            folder_effective_time=folder_effective_time,
         )
 
     def _apply_file_update(self, file_id: EagleFileID,

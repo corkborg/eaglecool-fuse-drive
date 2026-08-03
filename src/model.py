@@ -27,13 +27,14 @@ class EagleFolder:
     def normalize_name(self):
         return sanitize_filename(f'{self.name}_{self.id}')
 
-    def to_stat(self):
+    def to_stat(self, effective_time: datetime | None = None):
         st = FSStat()
         st.st_uid =  os.getuid()
         st.st_gid =  os.getgid()
-        st.st_atime = int(self.modification_time.timestamp())
-        st.st_mtime = int(self.modification_time.timestamp())
-        #st.st_ctime = self.modificationTime
+        time = effective_time if effective_time is not None else self.modification_time
+        st.st_atime = int(time.timestamp())
+        st.st_mtime = int(time.timestamp())
+        st.st_ctime = int(time.timestamp())
         st.st_mode = stat.S_IFDIR | 0o755
         st.st_nlink = 2
         return st

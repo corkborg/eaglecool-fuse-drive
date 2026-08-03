@@ -1,11 +1,20 @@
+from datetime import datetime, timezone
 from pathlib import Path
 import unittest
 from unittest.mock import patch
 
 from watchfiles import Change
 
-from src.eagle_repository import EagleRepository
-from src.model import EagleFile, EagleFileID, EagleFolder, EagleFolderID
+from src.eagle_repository import EagleRepository, _compute_folder_effective_times
+from src.model import (
+    EagleFile,
+    EagleFileID,
+    EagleFolder,
+    EagleFolderID,
+    EagleRootFolderID,
+    eagle_file_factory,
+    eagle_folder_factory,
+)
 
 
 class TestClass(unittest.TestCase):
@@ -132,5 +141,81 @@ class TestClass(unittest.TestCase):
     def test_get_metadata_not_found(self):
         with self.assertRaises(FileNotFoundError):
             self.repo.get_metadata("/no_such_folder/no_such_file.png")
+
+    def test_get_folder_time_reflects_direct_child_file(self):
+        """
+        フォルダ自身の modificationTime より、直下ファイルの時刻が新しければそちらを使う
+        """
+        folder_time = self.repo.get_folder_time(EagleFolderID("MF7X2TP5LYADS"))
+        # orangepng の lastModified (1757142190311ms) がフォルダ自身の
+        # modificationTime (1757142167513ms) より新しく、これが実効時刻になる
+        self.assertEqual(folder_time, datetime.fromtimestamp(1757142190311 / 1000, tz=timezone.utc))
+
+    def test_get_folder_time_propagates_through_nested_folders(self):
+        """
+        孫階層のファイル時刻が祖先フォルダの実効時刻にも再帰的に伝播する
+        """
+        sub_folder_time = self.repo.get_folder_time(EagleFolderID("MF7X4W2XB8DTM"))
+        parent_folder_time = self.repo.get_folder_time(EagleFolderID("MF7X4JQBHM2E7"))
+        # light blue の lastModified (1757142268882ms) は sub folder / nested_folder
+        # いずれの自己の modificationTime よりも新しく、両階層に伝播するはず
+        expected = datetime.fromtimestamp(1757142268882 / 1000, tz=timezone.utc)
+        self.assertEqual(sub_folder_time, expected)
+        self.assertEqual(parent_folder_time, expected)
+
+    def test_get_folder_time_root_reflects_descendants(self):
+        """
+        ルート直下のファイル/トップレベルフォルダを再帰集約した時刻になる
+        """
+        root_time = self.repo.get_folder_time(EagleRootFolderID)
+        # blue (root 直下ファイル) の lastModified がライブラリ全体で最も新しい
+        self.assertEqual(root_time, datetime.fromtimestamp(1757142569154 / 1000, tz=timezone.utc))
+
+
+class TestComputeFolderEffectiveTimes(unittest.TestCase):
+    """
+    _compute_folder_effective_times を、実ファイルに依存しない小さなツリーで直接検証する。
+    """
+
+    def setUp(self) -> None:
+        self.fallback = datetime.fromtimestamp(0, tz=timezone.utc)
+        self.tree = [eagle_folder_factory({
+            'id': 'P', 'name': 'parent', 'modificationTime': 1000,
+            'children': [
+                {'id': 'C', 'name': 'child', 'modificationTime': 2000, 'children': []},
+            ],
+        })]
+
+    def test_recurses_across_multiple_levels(self):
+        file = eagle_file_factory({'id': 'F', 'name': 'f', 'modificationTime': 9000, 'lastModified': 9000})
+        indexed_files = {EagleFileID('F'): file}
+        files_by_folder = {EagleFolderID('C'): {EagleFileID('F')}}
+
+        times = _compute_folder_effective_times(self.tree, indexed_files, files_by_folder, self.fallback)
+
+        expected = datetime.fromtimestamp(9000 / 1000, tz=timezone.utc)
+        self.assertEqual(times[EagleFolderID('C')], expected)
+        # 孫にあたるファイルの時刻が、直下に何も持たない祖先フォルダにも伝播する
+        self.assertEqual(times[EagleFolderID('P')], expected)
+
+    def test_recomputes_from_scratch_instead_of_mutating(self):
+        """
+        フォルダの生の modification_time を書き換えない設計により、ファイルが
+        取り除かれた後の再計算では実効時刻がフォルダ自身の時刻まで正しく戻る。
+        """
+        file = eagle_file_factory({'id': 'F', 'name': 'f', 'modificationTime': 9000, 'lastModified': 9000})
+        indexed_files = {EagleFileID('F'): file}
+        files_by_folder = {EagleFolderID('C'): {EagleFileID('F')}}
+        _compute_folder_effective_times(self.tree, indexed_files, files_by_folder, self.fallback)
+
+        # 同じ self.tree インスタンスに対して、ファイルなしで再計算する
+        times_after_removal = _compute_folder_effective_times(self.tree, {}, {}, self.fallback)
+
+        self.assertEqual(
+            times_after_removal[EagleFolderID('C')],
+            datetime.fromtimestamp(2000 / 1000, tz=timezone.utc))
+        self.assertEqual(
+            times_after_removal[EagleFolderID('P')],
+            datetime.fromtimestamp(2000 / 1000, tz=timezone.utc))
 
 

@@ -8,7 +8,7 @@ import fuse
 from fuse import Fuse
 
 from src.eagle_repository import EagleRepository
-from src.model import FSStat
+from src.model import EagleFolder, EagleRootFolderID, FSStat
 
 logger = logging.getLogger("eagle")
 logger.setLevel(logging.INFO)
@@ -62,10 +62,16 @@ class EagleFS(Fuse):
             st.st_gid = os.getgid()
             st.st_mode = stat.S_IFDIR | 0o775
             st.st_nlink = 2
+            root_time = self.repository.get_folder_time(EagleRootFolderID)
+            st.st_atime = int(root_time.timestamp())
+            st.st_mtime = int(root_time.timestamp())
+            st.st_ctime = int(root_time.timestamp())
             return st
 
         try:
             file = self.repository.get_metadata(path)
+            if isinstance(file, EagleFolder):
+                return file.to_stat(self.repository.get_folder_time(file.id))
             return file.to_stat()
         except FileNotFoundError:
             return -errno.ENOENT

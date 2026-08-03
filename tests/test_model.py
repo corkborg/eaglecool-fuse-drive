@@ -1,6 +1,7 @@
 import unittest
+from datetime import datetime, timezone
 
-from src.model import eagle_file_factory
+from src.model import eagle_file_factory, eagle_folder_factory
 
 
 class TestEagleFile(unittest.TestCase):
@@ -25,3 +26,21 @@ class TestEagleFile(unittest.TestCase):
         self.assertEqual(st.st_mtime, 1700000000)
         self.assertEqual(st.st_atime, 1700000001)
         self.assertEqual(st.st_ctime, 1700000001)
+
+
+class TestEagleFolder(unittest.TestCase):
+
+    def test_to_stat_defaults_to_own_modification_time(self):
+        folder = eagle_folder_factory({'id': 'F1', 'name': 'folder', 'modificationTime': 1700000000000})
+        st = folder.to_stat()
+        self.assertEqual(st.st_atime, 1700000000)
+        self.assertEqual(st.st_mtime, 1700000000)
+        self.assertEqual(st.st_ctime, 1700000000)
+
+    def test_to_stat_uses_given_effective_time(self):
+        folder = eagle_folder_factory({'id': 'F1', 'name': 'folder', 'modificationTime': 1700000000000})
+        effective_time = datetime.fromtimestamp(1700000005, tz=timezone.utc)
+        st = folder.to_stat(effective_time)
+        self.assertEqual(st.st_atime, 1700000005)
+        self.assertEqual(st.st_mtime, 1700000005)
+        self.assertEqual(st.st_ctime, 1700000005)
