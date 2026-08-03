@@ -212,11 +212,10 @@ class EagleRepository:
             try:
                 with open(f / 'metadata.json', 'r') as jf:
                     obj = json.load(jf)
+                file = eagle_file_factory(obj)
             except Exception:
                 logger.error("Skip broken metadata file: %s", f, exc_info=True)
                 continue
-
-            file = eagle_file_factory(obj)
 
             if file.is_deleted:
                 continue
@@ -312,11 +311,10 @@ class EagleRepository:
         try:
             with open(image_metadata, 'r') as f:
                 obj = json.load(f)
+            file = eagle_file_factory(obj)
         except Exception:
             logger.error("Skip broken metadata file: %s", image_metadata, exc_info=True)
             return
-
-        file = eagle_file_factory(obj)
 
         if file.is_deleted:
             self._remove_file(file.id, indexed_files, files_by_folder)
